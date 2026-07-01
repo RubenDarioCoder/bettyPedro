@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>Sistema de Gestión Integrado | Almacén</title>
+    <link rel="stylesheet" href="css/style.css">
+    
+    <script src="js/vendor/chart.umd.min.js"></script>
+</head>
+<body>
+
+    <!-- ===================== HEADER ===================== -->
+    <header class="app-header">
+        <div class="app-header__brand">📦 Sistema de Gestión Integrado</div>
+        <div class="app-header__actions">
+            <div class="cash-badge">💵 Efectivo Estimado en Caja: <span id="txtEfectivoEnCajaGlobal">$0.00</span></div>
+            <button type="button" id="btnBackupMenu" class="btn btn--ghost btn--auto btn--sm" title="Guardar o restaurar copia completa de todos los datos">
+                💾 Copia
+            </button>
+            <input type="file" id="inputRestaurarBackup" accept=".json,application/json" class="u-hidden" aria-hidden="true">
+            <button type="button" id="themeToggleBtn" class="theme-toggle" aria-label="Cambiar a modo oscuro" aria-pressed="false" title="Cambiar tema">
+                <span class="theme-toggle__thumb" aria-hidden="true">
+                    <span class="theme-toggle__icon-sun">☀️</span>
+                    <span class="theme-toggle__icon-moon u-hidden">🌙</span>
+                </span>
+            </button>
+        </div>
+    </header>
+
+    <!-- ===================== NAVEGACIÓN ===================== -->
+    <nav class="tabs" aria-label="Secciones del sistema">
+        <button class="tabs__btn tabs__btn--active" type="button" data-tab="solapa-ventas">🛒 Caja / Ventas</button>
+        <button class="tabs__btn" type="button" data-tab="solapa-productos">➕ Gestión de Productos</button>
+        <button class="tabs__btn" type="button" data-tab="solapa-historial-ventas">📋 Ventas Realizadas</button>
+        <button class="tabs__btn" type="button" data-tab="solapa-estadisticas">📊 Estadísticas de Ventas</button>
+        <button class="tabs__btn" type="button" data-tab="solapa-fiados">👥 Control de Fiados</button>
+        <button class="tabs__btn" type="button" data-tab="solapa-proveedores">🚚 Pago a Proveedores</button>
+    </nav>
+
+    <main class="tab-panels">
+
+        <!-- ===================== SOLAPA 1: CAJA / VENTAS ===================== -->
+        <section id="solapa-ventas" class="tab-panel tab-panel--active" aria-label="Caja y ventas">
+            <div class="l-split">
+
+                <div class="l-split__main card">
+                    <h2 class="card__title">Punto de Venta</h2>
+
+                    <div class="field">
+                        <label class="field__label" for="scannerInput">1. Escanear Código (Numérico)</label>
+                        <div class="field__row">
+                            <input type="text" id="scannerInput" class="field__input field__input--scanner" placeholder="Ej: 779..." autofocus autocomplete="off" inputmode="numeric">
+                            <button type="button" id="btnScannerManual" class="btn btn--primary btn--auto">Agregar</button>
+                        </div>
+                    </div>
+
+                    <div class="field search-combo u-mt-3">
+                        <label class="field__label" for="buscadorNombreVentas">O buscar producto por Nombre</label>
+                        <input type="text" id="buscadorNombreVentas" class="field__input" placeholder="Escribe para buscar..." autocomplete="off">
+                        <div id="resultadosBuscador" class="search-combo__results"></div>
+                    </div>
+
+                    <div class="ticket-box u-mt-4">
+                        <h3>🛒 Detalle del Ticket Actual</h3>
+                        <table class="ticket-table u-mt-2">
+                            <thead>
+                                <tr>
+                                    <th>Producto</th>
+                                    <th>Precio</th>
+                                    <th>Cant</th>
+                                    <th>Subtotal</th>
+                                    <th><span class="u-hidden">Acciones</span></th>
+                                </tr>
+                            </thead>
+                            <tbody id="cuerpoTicket"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="l-split__side card">
+                    <h2 class="card__title">Resumen de Venta</h2>
+                    <div class="summary-total" id="totalVenta">$0.00</div>
+
+                    <div class="field">
+                        <div class="payment-toggle">
+                            <label class="field__label payment-toggle__label" id="lblMetodoPago">Método de Pago</label>
+                            <button type="button" id="btnAlternarCombinado" class="btn btn--ghost btn--auto btn--sm">➕ Combinar Pagos</button>
+                        </div>
+
+                        <div id="panelPagoSimple">
+                            <select id="metodoPago" class="field__select" aria-labelledby="lblMetodoPago">
+                                <option value="EFECTIVO">Efectivo</option>
+                                <option value="DEBITO">Tarjeta de Débito</option>
+                                <option value="CREDITO">Tarjeta de Crédito</option>
+                                <option value="TRANSFERENCIA">Mercado Pago / Transf.</option>
+                                <option value="FIADO">⚠️ FIADO (Cuenta Corriente)</option>
+                            </select>
+                        </div>
+
+                        <div id="panelPagoCombinado" class="payment-combo u-hidden">
+                            <p class="payment-combo__hint">Escribe los montos correspondientes:</p>
+                            <div class="payment-combo__row"><span>Efectivo:</span><input type="number" id="compEfectivo" value="0" step="0.01" inputmode="decimal"></div>
+                            <div class="payment-combo__row"><span>Débito:</span><input type="number" id="compDebito" value="0" step="0.01" inputmode="decimal"></div>
+                            <div class="payment-combo__row"><span>Crédito:</span><input type="number" id="compCredito" value="0" step="0.01" inputmode="decimal"></div>
+                            <div class="payment-combo__row"><span>Transf/MP:</span><input type="number" id="compTransf" value="0" step="0.01" inputmode="decimal"></div>
+                            <div class="payment-combo__row"><span>Fiado:</span><input type="number" id="compFiado" value="0" step="0.01" inputmode="decimal"></div>
+                            <div id="txtMontoRestanteCombinado" class="payment-combo__remaining">Restan: $0.00</div>
+                        </div>
+                    </div>
+
+                    <div class="field field--callout u-hidden" id="grupoClienteFiado">
+                        <label class="field__label field__label--accent" for="clienteFiadoNombre">Nombre del Cliente para el Fiado *</label>
+                        <input type="text" id="clienteFiadoNombre" class="field__input" placeholder="Ej: Juan Pérez" autocomplete="off">
+                    </div>
+
+                    <div id="grupoEfectivoCalculo">
+                        <div class="field">
+                            <label class="field__label" for="pagaConInput">Paga Con (Efectivo Físico)</label>
+                            <input type="number" id="pagaConInput" class="field__input" placeholder="0.00" inputmode="decimal" step="0.01">
+                        </div>
+                        <div class="change-box" id="vueltoBox">Vuelto a entregar: $0.00</div>
+                    </div>
+
+                    <button type="button" class="btn btn--success btn--lg" id="btnFinalizarVenta">🛒 Cobrar y Registrar</button>
+                    <button type="button" class="btn btn--danger u-mt-2" id="btnCancelarTicket">Vaciar Ticket</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================== SOLAPA 2: GESTIÓN DE PRODUCTOS ===================== -->
+        <section id="solapa-productos" class="tab-panel" aria-label="Gestión de productos">
+            <div class="l-split">
+                <div class="l-split__side card">
+                    <h2 class="card__title" id="tituloFormProducto">Nuevo / Editar Producto</h2>
+                    <form id="formProducto" novalidate>
+                        <div class="field">
+                            <label class="field__label" for="prodCodigo">Código de Barras</label>
+                            <input type="text" id="prodCodigo" class="field__input" required autocomplete="off" inputmode="numeric">
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="prodNombre">Nombre del Producto</label>
+                            <input type="text" id="prodNombre" class="field__input" required autocomplete="off">
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="prodRubro">Rubro</label>
+                            <div class="field__row">
+                                <select id="prodRubro" class="field__select"></select>
+                                <button type="button" class="btn btn--ghost btn--auto btn--icon" id="btnAbrirModalRubro" title="Crear nuevo rubro" aria-label="Crear nuevo rubro">➕</button>
+                            </div>
+                        </div>
+                        <div class="l-grid-2">
+                            <div class="field">
+                                <label class="field__label" for="prodCosto">Costo ($)</label>
+                                <input type="number" step="0.01" id="prodCosto" class="field__input" required value="0" inputmode="decimal">
+                            </div>
+                            <div class="field">
+                                <label class="field__label" for="prodPorcentaje">Ganancia (%)</label>
+                                <input type="number" step="0.1" id="prodPorcentaje" class="field__input" required value="70" inputmode="decimal">
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="prodPrecioVenta">Precio Venta Ajustado ($)</label>
+                            <input type="number" step="0.01" id="prodPrecioVenta" class="field__input" required value="0" inputmode="decimal">
+                        </div>
+                        <div class="l-grid-2">
+                            <div class="field">
+                                <label class="field__label" for="prodStock">Stock Actual</label>
+                                <input type="number" id="prodStock" class="field__input" required value="0" inputmode="numeric">
+                            </div>
+                            <div class="field">
+                                <label class="field__label" for="prodLimiteStock">Mínimo Crítico</label>
+                                <input type="number" id="prodLimiteStock" class="field__input" required value="3" inputmode="numeric">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn--primary" id="btnGuardarProducto">💾 Guardar Producto</button>
+                        <button type="button" class="btn btn--ghost u-mt-2" id="btnLimpiarProdForm">Cancelar</button>
+                    </form>
+                </div>
+
+                <div class="l-split__main card">
+                    <h3 class="card__title">Base de Datos Actual</h3>
+                    <input type="text" id="buscadorABM" class="field__input u-mb-3" placeholder="🔍 Buscar producto por nombre o código...">
+
+                    <div class="btn-group u-mb-2">
+                        <button type="button" class="btn btn--ghost" id="btnExportarCSV">📥 Exportar Catálogo (CSV)</button>
+                        <button type="button" class="btn btn--ghost" id="btnImportarCSV">📤 Importar Catálogo (CSV)</button>
+                    </div>
+                   
+                    <p class="u-text-sm u-text-muted u-mb-3">
+                        El CSV puede tener encabezados como Código, Nombre, Rubro, Costo, Porcentaje, Precio Venta, Stock y Stock Mínimo, en cualquier orden y sin importar acentos. Si no se reconocen los encabezados, se asume el mismo orden que el archivo exportado.
+                    </p>
+                    <input type="file" id="inputImportarCSV" accept=".csv,text/csv" class="u-hidden" aria-hidden="true">
+
+                    <div id="listaABM" class="abm-list" aria-live="polite"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================== SOLAPA 3: VENTAS REALIZADAS ===================== -->
+        <section id="solapa-historial-ventas" class="tab-panel" aria-label="Historial de ventas">
+            <div class="card">
+                <h2>📋 Listado de Ventas Hechas (Tickets Guardados)</h2>
+                <div class="filters-row u-mt-3">
+                    <input type="text" id="buscarHistorialCliente" class="field__input" placeholder="🔍 Filtrar por cliente...">
+                    <input type="date" id="buscarHistorialFecha" class="field__input">
+                </div>
+            </div>
+            <div class="card">
+                <div id="contenedorListaTicketsMaestro" class="history-grid" aria-live="polite"></div>
+                <div id="paginacionHistorial" class="pagination"></div>
+            </div>
+        </section>
+
+        <!-- ===================== SOLAPA 4: ESTADÍSTICAS ===================== -->
+        <section id="solapa-estadisticas" class="tab-panel" aria-label="Estadísticas de ventas">
+            <div class="card">
+                <h2>📊 Gráficos y Desglose Acumulado</h2>
+                <div class="stats-filters u-mt-3">
+                    <div class="field">
+                        <label class="field__label" for="filtoTipoVis">Visualizar por:</label>
+                        <select id="filtoTipoVis" class="field__select">
+                            <option value="PRODUCTO">Acumulado Por Producto</option>
+                            <option value="RUBRO">Acumulado Por Rubro</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="filtroFechaDesde">Fecha Desde</label>
+                        <input type="date" id="filtroFechaDesde" class="field__input">
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="filtroFechaHasta">Fecha Hasta</label>
+                        <input type="date" id="filtroFechaHasta" class="field__input">
+                    </div>
+                </div>
+            </div>
+
+            <div class="l-split">
+                <div class="l-split__main card">
+                    <h3>📈 Gráfico Analítico</h3>
+                    <div class="stats-canvas-wrap">
+                        <canvas id="graficoVentas"></canvas>
+                    </div>
+                </div>
+
+                <div class="l-split__side card">
+                    <h3>📋 Desglose del Período</h3>
+                    <div class="summary-total stats-total" id="totalAcumuladoStats">$0.00</div>
+                    <div id="listaDesgloseStats" class="stats-list"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================== SOLAPA 5: CONTROL DE FIADOS ===================== -->
+        <section id="solapa-fiados" class="tab-panel" aria-label="Control de fiados">
+            <div class="card kpi-banner kpi-banner--warning">
+                <div>
+                    <span class="kpi-banner__label">Balance Neto en la Calle (Fiados Pendientes)</span>
+                    <h2 id="total-general-fiados" class="kpi-banner__value kpi-banner__value--danger">$0.00</h2>
+                </div>
+                <div class="kpi-banner__icon">📊</div>
+            </div>
+
+            <div class="l-split">
+                <div class="l-split__side card">
+                    <h3 class="card__title" id="titulo-formulario-fiado">Nuevo Registro de Cuenta</h3>
+                    <form id="formularioFiado" novalidate>
+                        <input type="hidden" id="edit-id-fiado">
+
+                        <div class="field">
+                            <label class="field__label" for="nombreFiado">Nombre del cliente</label>
+                            <input type="text" id="nombreFiado" class="field__input" required placeholder="Ej: Juan Pérez" autocomplete="off">
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="montoFiado">Monto de la operación ($)</label>
+                            <input type="number" step="0.01" id="montoFiado" class="field__input" required placeholder="0.00" inputmode="decimal">
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="tipoFiado">Tipo de movimiento</label>
+                            <select id="tipoFiado" class="field__select">
+                                <option value="DEUDA" selected>⚠️ Se llevó mercadería (Fió)</option>
+                                <option value="PAGO">✅ Dejó dinero (Pagó Deuda)</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" id="btn-registrar-fiado" class="btn btn--primary">Registrar Operación</button>
+                        <button type="button" id="btn-cancelar-fiado" class="btn btn--ghost u-mt-2">Cancelar Edición</button>
+                    </form>
+                </div>
+
+                <div class="l-split__main card">
+                    <div class="filters-row">
+                        <input type="text" id="buscar-nombre-fiado" class="field__input" placeholder="🔍 Buscar cliente...">
+                        <input type="date" id="buscar-fecha-inicio-fiado" class="field__input">
+                        <input type="date" id="buscar-fecha-fin-fiado" class="field__input">
+                    </div>
+
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Cliente</th>
+                                    <th class="th--center">Operación</th>
+                                    <th class="th--right">Monto</th>
+                                    <th class="th--center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-registros-fiados"></tbody>
+                        </table>
+                    </div>
+                    <div id="paginacionFiados" class="pagination"></div>
+
+                    <div class="u-mt-4 fiados-export">
+                        <h3 class="card__title">Exportación / Importación de Cuentas</h3>
+                        <button type="button" class="btn btn--ghost u-mb-2" id="btnExportarFiados">📋 Copiar Registros Filtrados al Portapapeles</button>
+                        <p class="u-text-sm u-text-muted u-mb-2">Formato por línea: <code>fecha|cliente|DEUDA o PAGO|monto</code></p>
+                        <textarea id="texto-importar-fiado" class="field__textarea u-w-full" placeholder="Ej: 12/06/2026 10:30:00|Juan Pérez|DEUDA|1500"></textarea>
+                        <button type="button" class="btn btn--warning u-mt-2" id="btnImportarFiados">📥 Procesar e Importar Datos</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================== SOLAPA 6: PAGO A PROVEEDORES ===================== -->
+        <section id="solapa-proveedores" class="tab-panel" aria-label="Pago a proveedores">
+            <div class="card kpi-banner kpi-banner--success">
+                <div>
+                    <span class="kpi-banner__label">Total Egresos / Compras Registradas</span>
+                    <h2 id="total-gastos-proveedores" class="kpi-banner__value kpi-banner__value--success">$0.00</h2>
+                </div>
+                <div class="kpi-banner__icon">🚚</div>
+            </div>
+
+            <div class="l-split">
+                <div class="l-split__side card">
+                    <h3 class="card__title" id="titulo-form-proveedor">Registrar Pago / Factura</h3>
+                    <form id="formularioProveedor" novalidate>
+                        <input type="hidden" id="edit-id-proveedor">
+
+                        <div class="field">
+                            <label class="field__label" for="provNombreGasto">Nombre del Proveedor</label>
+                            <input type="text" id="provNombreGasto" class="field__input" required placeholder="Ej: Arcor, Quilmes..." autocomplete="off">
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="provMontoGasto">Monto Abonado ($)</label>
+                            <input type="number" step="0.01" id="provMontoGasto" class="field__input" required placeholder="0.00" inputmode="decimal">
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="provDetalleGasto">Detalle / Comentario</label>
+                            <input type="text" id="provDetalleGasto" class="field__input" placeholder="Ej: Factura Nro 1244" autocomplete="off">
+                        </div>
+
+                        <button type="submit" class="btn btn--success" id="btnGuardarProveedor">💾 Guardar Registro</button>
+                        <button type="button" id="btn-cancelar-prov" class="btn btn--ghost u-mt-2 u-hidden">Cancelar Edición</button>
+                    </form>
+                </div>
+
+                <div class="l-split__main card">
+                    <input type="text" id="buscar-proveedor-input" class="field__input u-mb-3" placeholder="🔍 Buscar por Proveedor...">
+
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Proveedor</th>
+                                    <th>Descripción</th>
+                                    <th class="th--right">Monto Pago</th>
+                                    <th class="th--center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-registros-proveedores"></tbody>
+                        </table>
+                    </div>
+                    <div id="paginacionProveedores" class="pagination"></div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ===================== MODAL: TICKET FISCAL ===================== -->
+    <div id="modalTicketImpreso" class="modal-overlay" aria-hidden="true">
+        <div class="modal receipt-modal">
+            <button class="modal__close" id="btnCerrarModalTicket" aria-label="Cerrar comprobante">✕</button>
+            <div id="contenidoTicketImpreso"></div>
+        </div>
+    </div>
+
+    <!-- ===================== MODAL: NUEVO RUBRO ===================== -->
+    <div id="modalNuevoRubro" class="modal-overlay" aria-hidden="true">
+        <div class="modal modal--sm">
+            <h3 class="modal__title">Crear Nuevo Rubro</h3>
+            <div class="field">
+                <label class="field__label" for="inputNuevoRubro">Nombre del Rubro</label>
+                <input type="text" id="inputNuevoRubro" class="field__input" placeholder="Ej: LÁCTEOS" autocomplete="off">
+            </div>
+            <div class="modal__actions">
+                <button type="button" class="btn btn--primary" id="btnGuardarNuevoRubro">Guardar</button>
+                <button type="button" class="btn btn--ghost" id="btnCerrarModalRubro">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== MODAL: IMPORTAR CATÁLOGO ===================== -->
+    <div id="modalImportarCatalogo" class="modal-overlay" aria-hidden="true">
+        <div class="modal">
+            <h3 class="modal__title">📤 Importar Catálogo desde CSV</h3>
+            <div class="modal__message" id="resumenImportacion"></div>
+            <div class="modal__actions modal__actions--column">
+                <button type="button" class="btn btn--primary" id="btnImportarCombinar">🔄 Combinar / Actualizar Existentes</button>
+                <button type="button" class="btn btn--danger" id="btnImportarReemplazar">⚠️ Reemplazar Todo el Catálogo</button>
+                <button type="button" class="btn btn--ghost" id="btnCancelarImportacion">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== MENÚ DESPLEGABLE: COPIA DE SEGURIDAD ===================== -->
+    <div id="menuBackup" class="backup-dropdown u-hidden" role="menu" aria-label="Opciones de copia de seguridad">
+        <button type="button" id="btnExportarBackup" class="backup-dropdown__item" role="menuitem">
+            <span class="backup-dropdown__icon">⬇️</span>
+            <div>
+                <strong>Guardar copia completa</strong>
+                <small>Descarga un .json con TODO: catálogo, ventas, fiados y proveedores</small>
+            </div>
+        </button>
+        <hr class="backup-dropdown__sep">
+        <button type="button" id="btnTriggerRestaurar" class="backup-dropdown__item" role="menuitem">
+            <span class="backup-dropdown__icon">⬆️</span>
+            <div>
+                <strong>Restaurar desde archivo</strong>
+                <small>Carga un .json generado por esta app en cualquier dispositivo</small>
+            </div>
+        </button>
+    </div>
+
+    <!-- ===================== MODAL: RESTAURAR BACKUP ===================== -->
+    <div id="modalRestaurar" class="modal-overlay" aria-hidden="true">
+        <div class="modal">
+            <h3 class="modal__title">⬆️ Restaurar Copia de Seguridad</h3>
+            <div id="resumenBackup" class="modal__message"></div>
+            <div class="modal__actions modal__actions--column">
+                <button type="button" class="btn btn--primary" id="btnRestaurarReemplazar">🔄 Reemplazar todo (recomendado)</button>
+                <button type="button" class="btn btn--ghost" id="btnRestaurarCombinar">➕ Combinar con datos actuales</button>
+                <button type="button" class="btn btn--ghost" id="btnCancelarRestaurar">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== MODAL: CONFIRMACIÓN (reemplaza confirm()) ===================== -->
+    <div id="modalConfirmacion" class="modal-overlay" aria-hidden="true" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitulo">
+        <div class="modal modal--sm">
+            <h3 class="modal__title" id="confirmTitulo">Confirmar acción</h3>
+            <p class="modal__message" id="confirmMensaje">¿Está seguro de que desea continuar?</p>
+            <div class="modal__actions">
+                <button type="button" class="btn btn--ghost" id="btnConfirmCancelar">Cancelar</button>
+                <button type="button" class="btn btn--danger" id="btnConfirmAceptar">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== NOTIFICACIONES (TOAST) ===================== -->
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="database.js"></script>
+    <script src="js/helpers.js"></script>
+    <script src="js/storage.service.js"></script>
+    <script src="js/pos.core.js"></script>
+    <script src="js/ui.manager.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
