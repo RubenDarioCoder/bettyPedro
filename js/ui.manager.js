@@ -409,25 +409,28 @@ const UIManager = (function () {
             renderTicket();
         });
 
-        // --- Nueva delegación para cambios manuales en el input de cantidad ---
+        // --- Delegación para cambios manuales en el input de cantidad ---
         on("cuerpoTicket", "change", (evento) => {
             const input = evento.target.closest(".ticket-cantidad-input");
             if (!input) return;
 
             const indice = Helpers.aEntero(input.dataset.index, -1);
-            const nuevaCantidad = Helpers.aNumero(input.value);
+            if (indice === -1) return;
 
-            if (indice !== -1 && nuevaCantidad > 0) {
-                const ticket = POSCore.obtenerTicket();
-                const item = ticket[indice];
-                if (item) {
-                    const delta = nuevaCantidad - item.cantidad;
-                    POSCore.cambiarCantidad(indice, delta);
-                }
-            } else if (indice !== -1 && nuevaCantidad <= 0) {
-                POSCore.eliminarItem(indice);
-            }
+            // Admite coma o punto decimal (ej: "0,550" kg de un producto
+            // vendido por peso) sin truncar la cantidad a entero.
+            POSCore.establecerCantidad(indice, input.value);
             renderTicket();
+        });
+
+        // Permite confirmar la cantidad tipeada con la tecla Enter
+        // (dispara el "blur", que a su vez activa el listener "change").
+        on("cuerpoTicket", "keydown", (evento) => {
+            if (evento.key !== "Enter") return;
+            const input = evento.target.closest(".ticket-cantidad-input");
+            if (!input) return;
+            evento.preventDefault();
+            input.blur();
         });
 
         // --- Buscador de productos por nombre ---
@@ -669,28 +672,28 @@ const UIManager = (function () {
         }
 
         ticket.forEach((item, index) => {
-            const subtotal = Helpers.aNumero(item.precio) * Helpers.aNumero(item.cantidad);
+            const subtotal = Helpers.redondear2(Helpers.aNumero(item.precio) * Helpers.aDecimal(item.cantidad, 3, 0));
             const fila = document.createElement("tr");
 
             fila.innerHTML = `
-                <td><strong>${item.nombre}</strong><br><small class="u-text-muted">${item.codigo}</small></td>
-                <td>${Helpers.formatearMoneda(item.precio)}</td>
-                <td>
-                    <div style="display: flex; align-items: center; gap: var(--space-1); justify-content: center;">
-                        <button type="button" class="btn btn--ghost btn--sm" data-accion="restar" data-index="${index}" style="padding: 2px 6px;">-</button>
-                        <input type="number" 
-                            class="ticket-cantidad-input" 
-                            data-index="${index}" 
-                            value="${item.cantidad}" 
-                            min="1" 
-                            step="1" 
-                            style="width: 65px; text-align: center; padding: 2px 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-weight: bold;">
-                        <button type="button" class="btn btn--ghost btn--sm" data-accion="sumar" data-index="${index}" style="padding: 2px 6px;">+</button>
+                <td class="ticket-table__name"><strong>${item.nombre}</strong><br><small class="u-text-muted">${item.codigo}</small></td>
+                <td class="ticket-table__qty">
+                    <div class="qty-stepper">
+                        <button type="button" class="qty-stepper__btn" data-accion="restar" data-index="${index}" aria-label="Restar">−</button>
+                        <input type="text"
+                            class="ticket-cantidad-input"
+                            data-index="${index}"
+                            value="${Helpers.formatearCantidad(item.cantidad)}"
+                            inputmode="decimal"
+                            autocomplete="off"
+                            aria-label="Cantidad">
+                        <button type="button" class="qty-stepper__btn" data-accion="sumar" data-index="${index}" aria-label="Sumar">+</button>
                     </div>
                 </td>
-                <td class="u-text-right"><strong>${Helpers.formatearMoneda(subtotal)}</strong></td>
-                <td class="u-text-center">
-                    <button type="button" class="btn btn--ghost btn--danger btn--sm" data-accion="eliminar" data-index="${index}" title="Quitar ítem" style="padding: var(--space-1) var(--space-2);">
+                <td class="ticket-table__price">${Helpers.formatearMoneda(item.precio)}</td>
+                <td class="ticket-table__subtotal">${Helpers.formatearMoneda(subtotal)}</td>
+                <td class="ticket-table__remove">
+                    <button type="button" class="icon-btn" data-accion="eliminar" data-index="${index}" title="Quitar ítem" aria-label="Quitar ítem">
                         🗑️
                     </button>
                 </td>
@@ -825,11 +828,11 @@ const UIManager = (function () {
 
         const lineas = (venta.productos || [])
             .map((item) => {
-                const subtotal = item.precio * item.cantidad;
+                const subtotal = Helpers.redondear2(item.precio * Helpers.aDecimal(item.cantidad, 3, 0));
                 return `
                     <div class="receipt__line-name">${Helpers.escaparHtml(item.nombre)}</div>
                     <div class="receipt__line-detail">
-                        <span>${item.cantidad} x ${Helpers.formatearMoneda(item.precio)}</span>
+                        <span>${Helpers.formatearCantidad(item.cantidad)} x ${Helpers.formatearMoneda(item.precio)}</span>
                         <span>${Helpers.formatearMoneda(subtotal)}</span>
                     </div>
                 `;
@@ -1408,7 +1411,7 @@ const UIManager = (function () {
             const itemsHtml = (venta.productos || [])
                 .map(
                     (item) =>
-                        `<div class="history-card__item"><span>${item.cantidad}x ${Helpers.escaparHtml(item.nombre)}</span><span>${Helpers.formatearMoneda(item.precio * item.cantidad)}</span></div>`
+                        `<div class="history-card__item"><span>${Helpers.formatearCantidad(item.cantidad)}x ${Helpers.escaparHtml(item.nombre)}</span><span>${Helpers.formatearMoneda(item.precio * Helpers.aDecimal(item.cantidad, 3, 0))}</span></div>`
                 )
                 .join("");
 
@@ -2005,188 +2008,6 @@ const UIManager = (function () {
     }
 
     // ==============================================================
-    // BACKUP / RESTORE — copia de seguridad completa de todo el sistema
-    // ==============================================================
-
-    /** Objeto pendiente de restauración (leído del archivo, sin aplicar aún). */
-    let backupPendiente = null;
-
-    /**
-     * Inicializa el botón "💾 Copia" del header y el flujo completo
-     * de exportar/importar la copia de seguridad total del sistema.
-     *
-     * Flujo de exportación:
-     *   click en "💾 Copia" → abre menú desplegable
-     *   click "Guardar copia completa" → descarga backup_almacen_FECHA.json
-     *
-     * Flujo de restauración:
-     *   click "Restaurar desde archivo" → abre selector de archivo .json
-     *   el archivo se parsea y valida → se muestra el modal con el resumen
-     *   usuario elige "Reemplazar todo" o "Combinar"
-     *   se aplica la restauración y se refrescan todas las vistas
-     */
-    function initBackup() {
-        const btnMenu = $("btnBackupMenu");
-        const menu = $("menuBackup");
-
-        // --- Abrir / cerrar el menú desplegable ---
-        if (btnMenu && menu) {
-            btnMenu.addEventListener("click", (evento) => {
-                evento.stopPropagation();
-                menu.classList.toggle("u-hidden");
-            });
-            // Cerrar el menú si se hace clic en cualquier otro lado
-            document.addEventListener("click", () => {
-                if (menu && !menu.classList.contains("u-hidden")) {
-                    menu.classList.add("u-hidden");
-                }
-            });
-        }
-
-        // --- Exportar backup completo ---
-        on("btnExportarBackup", "click", () => {
-            if (menu) menu.classList.add("u-hidden");
-            const { nombre, contenido } = StorageService.exportarTodo();
-            Helpers.descargarTexto(contenido, nombre, "application/json;charset=utf-8;");
-            mostrarToast("✅ Copia guardada: " + nombre, "success");
-        });
-
-        // --- Disparar el selector de archivo para restaurar ---
-        on("btnTriggerRestaurar", "click", () => {
-            if (menu) menu.classList.add("u-hidden");
-            const input = $("inputRestaurarBackup");
-            if (input) {
-                input.value = "";   // permite reseleccionar el mismo archivo
-                input.click();
-            }
-        });
-
-        // --- Leer el archivo seleccionado y mostrar el resumen ---
-        on("inputRestaurarBackup", "change", (evento) => {
-            const archivo = evento.target.files && evento.target.files[0];
-            if (!archivo) return;
-            const lector = new FileReader();
-            lector.onload = (e) => {
-                evento.target.value = "";
-                try {
-                    const parsed = JSON.parse(e.target.result);
-                    prepararRestauracion(parsed);
-                } catch {
-                    mostrarToast("❌ El archivo no es un JSON válido", "error");
-                }
-            };
-            lector.onerror = () => mostrarToast("❌ No se pudo leer el archivo", "error");
-            lector.readAsText(archivo, "UTF-8");
-        });
-
-        // --- Botones del modal de restauración ---
-        on("btnRestaurarReemplazar", "click", () => aplicarRestauracion("reemplazar"));
-        on("btnRestaurarCombinar",   "click", () => aplicarRestauracion("combinar"));
-        on("btnCancelarRestaurar",   "click", () => {
-            backupPendiente = null;
-            cerrarModal("modalRestaurar");
-        });
-
-        // Cerrar modal al hacer clic fuera
-        const overlay = $("modalRestaurar");
-        if (overlay) {
-            overlay.addEventListener("click", (evento) => {
-                if (evento.target === overlay) {
-                    backupPendiente = null;
-                    cerrarModal("modalRestaurar");
-                }
-            });
-        }
-    }
-
-    /**
-     * Valida el objeto parseado del backup, muestra el resumen en el
-     * modal de confirmación y lo guarda en `backupPendiente`.
-     * @param {object} backup
-     */
-    function prepararRestauracion(backup) {
-        if (!backup || typeof backup !== "object") {
-            mostrarToast("❌ El archivo no contiene datos válidos", "error");
-            return;
-        }
-
-        backupPendiente = backup;
-
-        const productos   = backup.productos   ? Object.keys(backup.productos).length : 0;
-        const rubros      = Array.isArray(backup.rubros)      ? backup.rubros.length      : 0;
-        const ventas      = Array.isArray(backup.ventas)      ? backup.ventas.length      : 0;
-        const fiados      = Array.isArray(backup.fiados)      ? backup.fiados.length      : 0;
-        const proveedores = Array.isArray(backup.proveedores) ? backup.proveedores.length : 0;
-
-        const fechaGen = backup.generadoEn
-            ? Helpers.formatearFechaHora(new Date(backup.generadoEn))
-            : "desconocida";
-
-        const contenedor = $("resumenBackup");
-        if (contenedor) {
-            contenedor.innerHTML = `
-                <p class="u-text-sm u-text-muted u-mb-3">
-                    Archivo generado el <strong>${Helpers.escaparHtml(fechaGen)}</strong>.
-                    Revisá el resumen antes de aplicar:
-                </p>
-                <div class="backup-summary">
-                    <div class="backup-summary__row"><span>📦 Productos en catálogo</span><strong>${productos}</strong></div>
-                    <div class="backup-summary__row"><span>📂 Rubros</span><strong>${rubros}</strong></div>
-                    <div class="backup-summary__row"><span>🧾 Tickets de venta</span><strong>${ventas}</strong></div>
-                    <div class="backup-summary__row"><span>👥 Fiados (cuentas corrientes)</span><strong>${fiados}</strong></div>
-                    <div class="backup-summary__row"><span>🚚 Pagos a proveedores</span><strong>${proveedores}</strong></div>
-                </div>
-            `;
-        }
-
-        abrirModal("modalRestaurar");
-    }
-
-    /**
-     * Aplica el backup pendiente con el modo elegido por el usuario,
-     * recarga todos los datos en memoria y refresca las vistas.
-     * @param {"reemplazar"|"combinar"} modo
-     */
-    function aplicarRestauracion(modo) {
-        if (!backupPendiente) return;
-
-        cerrarModal("modalRestaurar");
-
-        const resultado = StorageService.restaurarTodo(backupPendiente, modo);
-        backupPendiente = null;
-
-        if (!resultado.ok) {
-            mostrarToast("❌ " + resultado.mensaje, "error");
-            return;
-        }
-
-        // Recargar todo en memoria
-        productosDB         = resultado.productos;
-        rubrosDisponibles   = resultado.rubros;
-        historialVentas     = resultado.ventas;
-        registrosFiados     = resultado.fiados;
-        registrosProveedores = resultado.proveedores;
-
-        // Refrescar todas las vistas
-        actualizarSelectRubros();
-        renderTicket();
-        renderListaProductos();
-        paginacion.historial.pagina   = 1;
-        paginacion.fiados.pagina      = 1;
-        paginacion.proveedores.pagina = 1;
-        renderHistorial();
-        renderFiados();
-        renderProveedores();
-        renderEstadisticas();
-        actualizarEfectivoCaja();
-
-        const r = resultado.resumen;
-        const detalle = `${r.productos} productos · ${r.ventas} ventas · ${r.fiados} fiados · ${r.proveedores} proveedores`;
-        const verbo = modo === "reemplazar" ? "Restauración completada" : "Combinación completada";
-        mostrarToast(`✅ ${verbo} — ${detalle}`, "success");
-    }
-
-    // ==============================================================
     // CAJA MAESTRA (Efectivo estimado)
     // ==============================================================
 
@@ -2219,7 +2040,6 @@ const UIManager = (function () {
         initTema();
         initTabs();
         initModales();
-        initBackup();
         initCaja();
         initProductos();
         initHistorial();
