@@ -1,5 +1,4 @@
 
-
 const StorageService = (function () {
     "use strict";
 
@@ -84,8 +83,8 @@ const StorageService = (function () {
             costo: Helpers.aNumero(p.costo, 0),
             porcentaje: Helpers.aNumero(p.porcentaje, 0),
             precioVenta: Helpers.aNumero(p.precioVenta, 0),
-            stock: Helpers.aEntero(p.stock, 0),
-            limiteStock: Helpers.aEntero(p.limiteStock, 3),
+            stock: Helpers.aDecimal(p.stock, 3, 0),
+            limiteStock: Helpers.aDecimal(p.limiteStock, 3, 3),
         };
     }
 
@@ -133,7 +132,7 @@ const StorageService = (function () {
             rubro: typeof i.rubro === "string" ? i.rubro : "ALMACÉN",
             costo: Helpers.aNumero(i.costo, 0),
             precio: Helpers.aNumero(i.precio, 0),
-            cantidad: Helpers.aEntero(i.cantidad, 0),
+            cantidad: Helpers.aDecimal(i.cantidad, 3, 0),
         };
     }
 
@@ -346,146 +345,6 @@ const StorageService = (function () {
         return { productos, rubros };
     }
 
-    // ------------------------------------------------------------
-    // Backup / Restore — exportación e importación TOTAL del sistema
-    // ------------------------------------------------------------
-
-    /**
-     * Versión del formato de backup. Se incrementa si algún día
-     * cambia la estructura interna; permite que `restaurarTodo`
-     * detecte archivos de una versión incompatible y lo informe
-     * en lugar de silenciosamente romper datos.
-     */
-    const VERSION_BACKUP = 1;
-
-    /**
-     * Empaqueta TODA la información del sistema en un único objeto
-     * JSON listo para descargar como archivo.
-     *
-     * Incluye: catálogo de productos, rubros, historial de ventas,
-     * fiados (cuentas corrientes) y pagos a proveedores.
-     * No incluye la preferencia de tema (es una preferencia visual
-     * por dispositivo, no un dato de negocio).
-     *
-     * El archivo generado se llama:
-     *   backup_almacen_AAAA-MM-DD_HH-MM.json
-     *
-     * @returns {{ nombre: string, contenido: string }}
-     *   `nombre` es el nombre de archivo sugerido para la descarga.
-     *   `contenido` es el JSON serializado listo para escribir.
-     */
-    function exportarTodo() {
-        const ahora = new Date();
-        const marca =
-            `${ahora.getFullYear()}-` +
-            `${Helpers.pad(ahora.getMonth() + 1)}-` +
-            `${Helpers.pad(ahora.getDate())}_` +
-            `${Helpers.pad(ahora.getHours())}-` +
-            `${Helpers.pad(ahora.getMinutes())}`;
-
-        const backup = {
-            version: VERSION_BACKUP,
-            generadoEn: ahora.toISOString(),
-            productos: leer(KEYS.PRODUCTOS, {}),
-            rubros: leer(KEYS.RUBROS, RUBROS_INICIALES),
-            ventas: leer(KEYS.VENTAS, []),
-            fiados: leer(KEYS.FIADOS, []),
-            proveedores: leer(KEYS.PROVEEDORES, []),
-        };
-
-        return {
-            nombre: `backup_almacen_${marca}.json`,
-            contenido: JSON.stringify(backup, null, 2),
-        };
-    }
-
-    /**
-     * Restaura TODO el sistema a partir de un objeto ya parseado
-     * (el contenido de un archivo de backup exportado previamente).
-     *
-     * Sanitiza cada sección antes de escribirla para que un archivo
-     * corrupto o de versión antigua no rompa el estado en memoria.
-     *
-     * @param {object} backup  El objeto parseado del archivo JSON.
-     * @param {"combinar"|"reemplazar"} modo
-     *   - "reemplazar" (default): borra los datos actuales y escribe
-     *     lo que viene del backup. Ideal para sincronizar un
-     *     dispositivo nuevo con la última copia maestra.
-     *   - "combinar": fusiona lo que viene del backup con los datos
-     *     existentes. Para ventas/fiados/proveedores se agregan los
-     *     registros que no existan ya (comparados por id). Para
-     *     productos, los del backup prevalecen sobre los locales
-     *     (se actualiza el catálogo pero no se borra lo que no esté
-     *     en el backup).
-     *
-     * @returns {{ ok: boolean, mensaje: string, resumen: object }}
-     */
-    function restaurarTodo(backup, modo = "reemplazar") {
-        if (!backup || typeof backup !== "object") {
-            return { ok: false, mensaje: "El archivo no contiene datos válidos.", resumen: {} };
-        }
-        if (backup.version && backup.version > VERSION_BACKUP) {
-            return {
-                ok: false,
-                mensaje: `El archivo fue generado con una versión más nueva (v${backup.version}). Actualizá la aplicación antes de restaurar.`,
-                resumen: {},
-            };
-        }
-
-        // ---- Sanitizar todas las secciones ----
-        const productosNuevos = sanitizarProductosDB(backup.productos || {});
-        const rubrosNuevos = sanitizarRubros(backup.rubros || []);
-        const ventasNuevas = Array.isArray(backup.ventas) ? backup.ventas.map(sanitizarVenta).filter(Boolean) : [];
-        const fiadosNuevos = Array.isArray(backup.fiados) ? backup.fiados.map(sanitizarFiado).filter(Boolean) : [];
-        const proveedoresNuevos = Array.isArray(backup.proveedores) ? backup.proveedores.map(sanitizarProveedor).filter(Boolean) : [];
-
-        let productos, rubros, ventas, fiados, proveedores;
-
-        if (modo === "combinar") {
-            // Catálogo: el backup actualiza/agrega sin borrar lo local.
-            const productosLocales = cargarProductos() || {};
-            productos = Object.assign({}, productosLocales, productosNuevos);
-
-            // Rubros: unión sin duplicados.
-            const rubrosLocales = cargarRubros();
-            rubros = sanitizarRubros(Array.from(new Set([...rubrosLocales, ...rubrosNuevos])));
-
-            // Listas: agregar solo los registros cuyo `id` no existe ya.
-            const idsVentas = new Set((cargarVentas()).map((v) => v.id));
-            ventas = [...cargarVentas(), ...ventasNuevas.filter((v) => !idsVentas.has(v.id))];
-
-            const idsFiados = new Set((cargarFiados()).map((f) => f.id));
-            fiados = [...cargarFiados(), ...fiadosNuevos.filter((f) => !idsFiados.has(f.id))];
-
-            const idsProv = new Set((cargarProveedores()).map((p) => p.id));
-            proveedores = [...cargarProveedores(), ...proveedoresNuevos.filter((p) => !idsProv.has(p.id))];
-        } else {
-            // Modo "reemplazar": sustituir todo por el backup.
-            productos = productosNuevos;
-            rubros = rubrosNuevos;
-            ventas = ventasNuevas;
-            fiados = fiadosNuevos;
-            proveedores = proveedoresNuevos;
-        }
-
-        // ---- Persistir ----
-        guardarProductos(productos);
-        guardarRubros(rubros);
-        guardarVentas(ventas);
-        guardarFiados(fiados);
-        guardarProveedores(proveedores);
-
-        const resumen = {
-            productos: Object.keys(productos).length,
-            rubros: rubros.length,
-            ventas: ventas.length,
-            fiados: fiados.length,
-            proveedores: proveedores.length,
-        };
-
-        return { ok: true, mensaje: "Restauración completada.", resumen, productos, rubros, ventas, fiados, proveedores };
-    }
-
     return Object.freeze({
         KEYS,
         DESGLOSE_PAGO_VACIO,
@@ -503,11 +362,8 @@ const StorageService = (function () {
         cargarTema,
         guardarTema,
         sanitizarProducto,
-        sanitizarProductosDB,
         sanitizarVenta,
         sanitizarFiado,
         sanitizarProveedor,
-        exportarTodo,
-        restaurarTodo,
     });
 })();
