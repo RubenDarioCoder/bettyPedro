@@ -260,55 +260,7 @@ textarea:focus-visible,
     align-items: center;
     gap: var(--space-3);
     flex-wrap: wrap;
-    position: relative; /* needed so the dropdown can position itself relative to this container */
 }
-
-/* ====== Menú desplegable de Copia de Seguridad ====== */
-.backup-dropdown {
-    position: fixed;           /* fixed so it clears the header on mobile */
-    top: 56px;                 /* just below the header */
-    right: var(--space-4);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
-    z-index: 200;
-    min-width: 280px;
-    overflow: hidden;
-    transition: background-color var(--transition-base), border-color var(--transition-base);
-}
-
-.backup-dropdown__item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: none;
-    border: none;
-    width: 100%;
-    text-align: left;
-    cursor: pointer;
-    color: var(--color-text);
-    transition: background-color var(--transition-fast);
-}
-.backup-dropdown__item:hover { background: var(--color-surface-alt); }
-.backup-dropdown__item strong { display: block; font-size: 0.92rem; }
-.backup-dropdown__item small  { display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-top: 2px; }
-.backup-dropdown__icon { font-size: 1.4rem; flex: 0 0 auto; }
-.backup-dropdown__sep { border: none; border-top: 1px solid var(--color-border); margin: 0; }
-
-/* ====== Resumen del backup en el modal de restauración ====== */
-.backup-summary { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
-.backup-summary__row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-2) 0;
-    border-bottom: 1px dashed var(--color-border);
-    font-size: 0.9rem;
-}
-.backup-summary__row:last-child { border-bottom: none; }
-.backup-summary__row strong { font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
 
 .cash-badge {
     background: var(--color-danger-soft);
@@ -611,7 +563,7 @@ textarea:focus-visible,
 .ticket-table__remove { text-align: center; }
 .ticket-table__empty { text-align: center; color: var(--color-text-muted); padding: var(--space-4) 0; }
 
-.qty-stepper { display: inline-flex; align-items: center; gap: var(--space-2); justify-content: center; }
+.qty-stepper { display: inline-flex; align-items: center; gap: var(--space-1); justify-content: center; }
 .qty-stepper__btn {
     width: 26px; height: 26px; padding: 0;
     border-radius: var(--radius-sm);
@@ -620,10 +572,39 @@ textarea:focus-visible,
     color: var(--color-text);
     cursor: pointer;
     font-weight: 700;
+    flex: 0 0 auto;
     transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 .qty-stepper__btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .qty-stepper__value { min-width: 1.6em; text-align: center; font-weight: 700; font-family: var(--font-mono); }
+
+/* Input de cantidad del ticket: mismo look (borde redondeado, padding)
+   que el resto de los inputs de la app, pero con fondo blanco y texto
+   negro FIJOS en los dos temas (claro/oscuro). Esto evita además que
+   algunos navegadores (ej. Brave/Chrome con "tema oscuro forzado para
+   sitios") repinten el control con su propio dark-mode automático,
+   que es lo que producía la inconsistencia entre capturas. */
+.ticket-cantidad-input {
+    width: 60px;
+    flex: 0 0 auto;
+    padding: 5px 4px;
+    text-align: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    font-weight: 700;
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+    background: #ffffff;
+    color: #111827;
+    color-scheme: light;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.ticket-cantidad-input::placeholder { color: #9ca3af; }
+.ticket-cantidad-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
 
 .icon-btn {
     background: none;
