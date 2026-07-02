@@ -1,5 +1,31 @@
+/**
+ * =====================================================================
+ *  Helpers — Utilidades transversales sin estado, sin DOM
+ * =====================================================================
+ *
+ *  Reglas de conversión numérica:
+ *
+ *  · aDecimal(valor)   → preserva decimales. Acepta "0,550" → 0.55
+ *                         Usada para CANTIDADES tipeadas a mano.
+ *
+ *  · aNumero(valor)    → preserva decimales, NO redondea.
+ *                         Usada para PRECIOS / MONTOS (pueden tener
+ *                         centavos internamente durante el cálculo).
+ *
+ *  · redondear2(valor) → redondea al entero más cercano (sin centavos).
+ *                         Solo se aplica al MOSTRAR en pantalla o al
+ *                         persistir el total final de una venta.
+ *
+ *  · formatearMoneda() → formatea sin decimales ($ 1.400, no $ 1400,00)
+ *
+ *  · formatearCantidad() → formatea con coma decimal (0,55; 2; 1,5)
+ */
 const Helpers = (function () {
     "use strict";
+
+    // ----------------------------------------------------------------
+    // Utilidades generales
+    // ----------------------------------------------------------------
 
     /**
      * Rellena un número con ceros a la izquierda.
@@ -12,48 +38,99 @@ const Helpers = (function () {
     }
 
     /**
-     * Generador centralizado de IDs únicos del sistema.
-     * Formato: `${PREFIJO}-${AAAAMMDDHHmmssSSS}-${SUFIJO_ALEATORIO}`
-     *
-     * Mantiene la trazabilidad temporal (útil para depurar e identificar
-     * a simple vista cuándo se generó un registro) y añade un sufijo
-     * aleatorio de 4 caracteres para garantizar unicidad incluso si dos
-     * registros se crean en el mismo milisegundo.
-     *
-     * @param {string} prefijo Ej: "TK", "FD", "PROV", "M"
+     * Genera un ID único con marca de tiempo.
+     * Formato: `${PREFIJO}-${AAAAMMDDHHmmssSSS}-${ALEATORIO}`
+     * @param {string} prefijo  Ej: "TK", "FD", "PROV"
      * @returns {string}
      */
     function generarId(prefijo) {
         const ahora = new Date();
-        const marcaTiempo =
+        const ts =
             `${ahora.getFullYear()}${pad(ahora.getMonth() + 1)}${pad(ahora.getDate())}` +
-            `${pad(ahora.getHours())}${pad(ahora.getMinutes())}${pad(ahora.getSeconds())}${pad(ahora.getMilliseconds(), 3)}`;
+            `${pad(ahora.getHours())}${pad(ahora.getMinutes())}${pad(ahora.getSeconds())}` +
+            `${pad(ahora.getMilliseconds(), 3)}`;
         const sufijo = Math.random().toString(36).slice(2, 6).toUpperCase();
-        return `${prefijo}-${marcaTiempo}-${sufijo}`;
+        return `${prefijo}-${ts}-${sufijo}`;
     }
 
+    // ----------------------------------------------------------------
+    // Conversión numérica
+    // ----------------------------------------------------------------
+
     /**
-     * Convierte un valor a tipo numérico entero (descarta centavos).
+     * Convierte un valor a número decimal (punto como separador interno).
+     * Acepta tanto punto como coma como separador decimal.
+     * NO redondea.  Usado para PRECIOS y MONTOS.
+     *
      * @param {*} valor
-     * @param {number} [valorPorDefecto=0]
+     * @param {number} [porDefecto=0]
      * @returns {number}
      */
-    function aNumero(valor, valorPorDefecto = 0) {
-        if (valor === null || valor === undefined) return valorPorDefecto;
-        if (typeof valor === "number") return Math.round(valor);
-        const n = parseFloat(String(valor).replace(/[^0-9.-]/g, ""));
-        return isNaN(n) ? valorPorDefecto : Math.round(n);
+    function aNumero(valor, porDefecto = 0) {
+        if (valor === null || valor === undefined || valor === "") return porDefecto;
+        if (typeof valor === "number") return isNaN(valor) ? porDefecto : valor;
+        // Reemplaza coma decimal por punto y elimina separadores de miles
+        const texto = String(valor)
+            .trim()
+            .replace(/[^\d.,-]/g, "")   // deja solo dígitos, punto, coma, guión
+            .replace(/^(-?)(\d+)\.(\d{3})$/, "$1$2$3")   // 1.400 (miles) → 1400
+            .replace(",", ".");          // coma decimal → punto
+        const n = parseFloat(texto);
+        return isNaN(n) ? porDefecto : n;
     }
 
     /**
-     * Convierte un valor a entero.
+     * Alias que convierte a número; utilizado donde el código espera
+     * un entero (paginación, índices). El redondeo es a entero.
+     * @param {*} valor
+     * @param {number} [porDefecto=0]
+     * @returns {number}
      */
-    function aEntero(valor, valorPorDefecto = 0) {
-        return aNumero(valor, valorPorDefecto);
+    function aEntero(valor, porDefecto = 0) {
+        return Math.round(aNumero(valor, porDefecto));
     }
 
     /**
-     * Redondea un número a 0 decimales.
+     * Convierte una cantidad tipeada a mano a número decimal.
+     * Regla simple: una sola coma siempre es separador DECIMAL
+     * (nunca separador de miles), porque nadie escribe "1,200" para
+     * decir "mil doscientas unidades" en el teclado del almacén.
+     *
+     * Ejemplos: "0,550" → 0.55  |  "2,5" → 2.5  |  "1.234,56" → 1234.56
+     *
+     * @param {*} valor
+     * @param {number} [decimales=3]   máximo de decimales a preservar
+     * @param {number} [porDefecto=0]
+     * @returns {number}
+     */
+    function aDecimal(valor, decimales = 3, porDefecto = 0) {
+        if (valor === null || valor === undefined || valor === "") return porDefecto;
+        if (typeof valor === "number") return isNaN(valor) ? porDefecto : valor;
+
+        let texto = String(valor).trim().replace(/[^\d.,-]/g, "");
+        if (texto === "") return porDefecto;
+
+        const tieneComa  = texto.includes(",");
+        const tienePunto = texto.includes(".");
+
+        if (tieneComa && tienePunto) {
+            // 1.234,56 → 1234.56  (punto=miles, coma=decimal)
+            texto = texto.replace(/\./g, "").replace(",", ".");
+        } else if (tieneComa) {
+            // 0,550 → 0.550  (la coma ES decimal, no miles)
+            texto = texto.replace(",", ".");
+        }
+        // si solo hay punto, ya es el formato estándar
+
+        const n = parseFloat(texto);
+        if (isNaN(n)) return porDefecto;
+        const factor = Math.pow(10, decimales);
+        return Math.round(n * factor) / factor;
+    }
+
+    /**
+     * Redondea al entero más cercano (sin centavos).
+     * Solo se usa en el total final de una venta o al mostrar montos.
      * @param {number} valor
      * @returns {number}
      */
@@ -62,19 +139,38 @@ const Helpers = (function () {
         return Math.round(Number(valor) || 0);
     }
 
+    // ----------------------------------------------------------------
+    // Formateo
+    // ----------------------------------------------------------------
+
     /**
-     * Formatea un número como moneda sin decimales (centavos).
+     * Formatea un monto en pesos sin centavos.
+     * Ej: 1400 → "$ 1.400"  |  2500.7 → "$ 2.501"
      * @param {number|string} valor
      * @returns {string}
      */
     function formatearMoneda(valor) {
-        const n = aNumero(valor);
+        const n = redondear2(aNumero(valor));
         return n.toLocaleString("es-AR", {
             style: "currency",
             currency: "ARS",
             minimumFractionDigits: 0,
-            maximumFractionDigits: 0
+            maximumFractionDigits: 0,
         });
+    }
+
+    /**
+     * Formatea una cantidad decimal para mostrar en pantalla,
+     * usando coma como separador decimal y eliminando ceros finales.
+     * Ej: 0.55 → "0,55"  |  1 → "1"  |  2.5 → "2,5"  |  3.333 → "3,333"
+     * @param {*} valor
+     * @returns {string}
+     */
+    function formatearCantidad(valor) {
+        const n = aDecimal(valor, 3, 0);
+        // toFixed(3) garantiza 3 decimales, luego recorta ceros finales
+        let texto = n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+        return texto.replace(".", ",");
     }
 
     /**
@@ -83,14 +179,15 @@ const Helpers = (function () {
      * @returns {string}
      */
     function formatearFechaHora(fecha) {
-        return `${fecha.toLocaleDateString()} ${fecha.toLocaleTimeString()}`;
+        return `${fecha.toLocaleDateString("es-AR")} ${fecha.toLocaleTimeString("es-AR")}`;
     }
 
+    // ----------------------------------------------------------------
+    // Utilidades de texto / DOM
+    // ----------------------------------------------------------------
+
     /**
-     * Escapa caracteres especiales de HTML para insertar texto dinámico
-     * de forma segura dentro de `innerHTML` (previene HTML injection
-     * cuando se renderizan nombres de productos / clientes ingresados
-     * por el usuario).
+     * Escapa caracteres especiales de HTML para prevenir inyección.
      * @param {*} texto
      * @returns {string}
      */
@@ -105,237 +202,138 @@ const Helpers = (function () {
     }
 
     /**
-     * Crea una versión "debounced" de una función: solo se ejecutará
-     * tras `espera` ms sin nuevas invocaciones. Útil para inputs de
-     * búsqueda sobre listas grandes.
+     * Versión "debounced" de una función.
      * @param {Function} fn
-     * @param {number} espera
+     * @param {number} espera  milisegundos
      * @returns {Function}
      */
     function debounce(fn, espera = 250) {
-        let temporizador = null;
+        let t = null;
         return function (...args) {
-            clearTimeout(temporizador);
-            temporizador = setTimeout(() => fn.apply(this, args), espera);
+            clearTimeout(t);
+            t = setTimeout(() => fn.apply(this, args), espera);
         };
     }
 
+    // ----------------------------------------------------------------
+    // CSV
+    // ----------------------------------------------------------------
+
     /**
-     * Normaliza una clave de texto para comparaciones tolerantes a
-     * acentos, mayúsculas y espacios/símbolos. Se usa para reconocer
-     * encabezados de columnas al importar archivos (ej: "Código",
-     * "codigo", "Cod. Barras" → "codbarras").
+     * Normaliza una clave de encabezado CSV (sin acentos, minúsculas,
+     * sin símbolos). Permite reconocer "Código" = "codigo", etc.
      * @param {*} texto
      * @returns {string}
      */
     function normalizarClave(texto) {
         return String(texto === null || texto === undefined ? "" : texto)
             .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "") // quita acentos/diacríticos
+            .replace(/[\u0300-\u036f]/g, "")
             .toLowerCase()
-            .replace(/[^a-z0-9%]/g, ""); // deja solo letras, números y "%"
+            .replace(/[^a-z0-9%]/g, "");
     }
 
     /**
-     * Detecta el delimitador más probable de una línea CSV comparando
-     * la cantidad de comas vs. punto y coma (planillas de Excel en
-     * configuración regional es-AR suelen exportar con ";").
+     * Detecta el delimitador más probable de una línea CSV (coma o punto y coma).
      * @param {string} linea
      * @returns {","|";"}
      */
     function detectarDelimitadorCsv(linea) {
-        const texto = String(linea || "");
-        const comas = (texto.match(/,/g) || []).length;
-        const puntoYComa = (texto.match(/;/g) || []).length;
-        return puntoYComa > comas ? ";" : ",";
+        const t = String(linea || "");
+        return ((t.match(/;/g) || []).length > (t.match(/,/g) || []).length) ? ";" : ",";
     }
 
     /**
-     * Parser de CSV tolerante (soporta campos entre comillas dobles,
-     * comillas escapadas como "" y saltos de línea \r\n o \n). Devuelve
-     * una matriz de filas, cada una como array de strings ya recortados
-     * (`trim`). Las filas completamente vacías se descartan.
+     * Parser CSV tolerante: soporta campos entre comillas dobles,
+     * comillas escapadas `""` y saltos de línea \r\n o \n.
      * @param {string} texto
-     * @param {string} [delimitador] "," o ";"
+     * @param {string} [delimitador=","]
      * @returns {string[][]}
      */
     function parsearCsv(texto, delimitador) {
         const delim = delimitador || ",";
         const filas = [];
-        let fila = [];
-        let campo = "";
-        let dentroComillas = false;
-        const contenido = String(texto || "");
+        let fila = [], campo = "", dentro = false;
+        const s = String(texto || "");
 
-        for (let i = 0; i < contenido.length; i++) {
-            const c = contenido[i];
-            if (dentroComillas) {
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (dentro) {
                 if (c === '"') {
-                    if (contenido[i + 1] === '"') {
-                        campo += '"';
-                        i++;
-                    } else {
-                        dentroComillas = false;
-                    }
-                } else {
-                    campo += c;
-                }
+                    if (s[i + 1] === '"') { campo += '"'; i++; }
+                    else { dentro = false; }
+                } else { campo += c; }
                 continue;
             }
-            if (c === '"') {
-                dentroComillas = true;
-            } else if (c === delim) {
-                fila.push(campo);
-                campo = "";
-            } else if (c === "\n") {
-                fila.push(campo);
-                filas.push(fila);
-                fila = [];
-                campo = "";
-            } else if (c === "\r") {
-                // se ignora; el salto real lo maneja "\n"
-            } else {
-                campo += c;
-            }
+            if      (c === '"')  { dentro = true; }
+            else if (c === delim){ fila.push(campo); campo = ""; }
+            else if (c === "\n") { fila.push(campo); filas.push(fila); fila = []; campo = ""; }
+            else if (c !== "\r") { campo += c; }
         }
-        if (campo !== "" || fila.length > 0) {
-            fila.push(campo);
-            filas.push(fila);
-        }
+        if (campo !== "" || fila.length > 0) { fila.push(campo); filas.push(fila); }
 
-        return filas.map((f) => f.map((c) => c.trim())).filter((f) => f.some((c) => c !== ""));
+        return filas.map(f => f.map(c => c.trim())).filter(f => f.some(c => c !== ""));
     }
 
     /**
-     * Normaliza un valor numérico que puede venir en formato regional
-     * es-AR (coma decimal, punto de miles) o con símbolos de moneda,
-     * devolviéndolo como string apto para `parseFloat`/`parseInt`.
+     * Normaliza números en formato es-AR para importación CSV
+     * (donde "1.234,56" sí significa miles + decimal).
+     * NO usar para cantidades tipeadas a mano — usar `aDecimal`.
      * @param {*} valor
-     * @returns {string}
+     * @returns {string}  String apto para parseFloat
      */
     function normalizarNumeroLocal(valor) {
-        let limpio = String(valor === null || valor === undefined ? "" : valor).trim();
-        if (limpio === "") return "0";
+        let s = String(valor === null || valor === undefined ? "" : valor).trim();
+        if (!s) return "0";
+        s = s.replace(/[^\d.,-]/g, "");
 
-        limpio = limpio.replace(/[^\d.,-]/g, "");
+        if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(s)) { s = s.replace(/\./g, "").replace(",", "."); }
+        else if (/^-?\d{1,3}(,\d{3})+$/.test(s))  { s = s.replace(/,/g, ""); }
+        else if (/^-?\d{1,3}(\.\d{3})+$/.test(s))  { s = s.replace(/\./g, ""); }
+        else if (/^-?\d+,\d+$/.test(s))             { s = s.replace(",", "."); }
 
-        if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(limpio)) {
-            limpio = limpio.replace(/\./g, "").replace(",", ".");
-        } else if (/^-?\d{1,3}(,\d{3})+$/.test(limpio)) {
-            limpio = limpio.replace(/,/g, "");
-        } else if (/^-?\d{1,3}(\.\d{3})+$/.test(limpio)) {
-            limpio = limpio.replace(/\./g, "");
-        } else if (/^-?\d+,\d+$/.test(limpio)) {
-            limpio = limpio.replace(",", ".");
-        }
-
-        return limpio || "0";
+        return s || "0";
     }
 
     /**
-     * Convierte un valor a número decimal, preservando hasta
-     * `decimales` posiciones (a diferencia de `aNumero`, que siempre
-     * redondea a entero y está pensado para montos en pesos).
-     *
-     * Se usa para cantidades vendidas por fracción/peso (ej: 0,550 kg
-     * de pan), donde el precio final en pesos sí debe redondearse sin
-     * centavos, pero la cantidad no puede perder sus decimales.
-     *
-     * A diferencia de `normalizarNumeroLocal` (pensada para importar
-     * montos desde planillas, donde "1,200" suele significar "mil
-     * doscientos"), esta función asume que el valor fue TIPEADO a mano
-     * por una persona en un campo de cantidad: una sola coma siempre
-     * se interpreta como separador decimal (nunca como agrupador de
-     * miles), ya que nadie escribe "1,200" para referirse a mil
-     * doscientas unidades en este contexto. Si el texto trae tanto
-     * coma como punto, se asume formato es-AR (punto = miles, coma =
-     * decimal), igual que en los montos de dinero.
-     * @param {*} valor
-     * @param {number} [decimales=3]
-     * @param {number} [valorPorDefecto=0]
-     * @returns {number}
-     */
-    function aDecimal(valor, decimales = 3, valorPorDefecto = 0) {
-        if (valor === null || valor === undefined || valor === "") return valorPorDefecto;
-
-        let texto = (typeof valor === "number" ? String(valor) : String(valor)).trim();
-        if (texto === "") return valorPorDefecto;
-
-        // Conserva solo dígitos, separadores decimales/miles y signo.
-        texto = texto.replace(/[^\d.,-]/g, "");
-
-        const tieneComa = texto.includes(",");
-        const tienePunto = texto.includes(".");
-
-        if (tieneComa && tienePunto) {
-            // Ambos separadores presentes → formato es-AR (1.234,56)
-            texto = texto.replace(/\./g, "").replace(",", ".");
-        } else if (tieneComa) {
-            // Solo coma → siempre es el separador decimal tipeado
-            texto = texto.replace(/,/g, ".");
-        }
-        // Si solo hay punto (o ninguno), ya queda en formato estándar.
-
-        const n = parseFloat(texto);
-        if (isNaN(n)) return valorPorDefecto;
-        const factor = Math.pow(10, decimales);
-        return Math.round(n * factor) / factor;
-    }
-
-    /**
-     * Formatea una cantidad (posiblemente fraccionaria) para mostrarla
-     * en pantalla con coma decimal (es-AR), recortando ceros finales
-     * innecesarios.
-     * Ejemplos: 1 → "1" · 0.5 → "0,5" · 0.55 → "0,55" · 2 → "2"
-     * @param {*} valor
-     * @returns {string}
-     */
-    function formatearCantidad(valor) {
-        const n = aDecimal(valor, 3, 0);
-        let texto = n.toFixed(3);
-        if (texto.includes(".")) {
-            texto = texto.replace(/0+$/, "").replace(/\.$/, "");
-        }
-        return texto.replace(".", ",");
-    }
-
-    /**
-     * Escapa un valor para insertarlo como campo de un archivo CSV,
-     * envolviéndolo en comillas dobles y duplicando las comillas
-     * internas.
+     * Escapa un valor para insertarlo como campo CSV.
      * @param {*} valor
      * @returns {string}
      */
     function escaparCsv(valor) {
-        const texto = valor === null || valor === undefined ? "" : String(valor);
-        return `"${texto.replace(/"/g, '""')}"`;
+        const t = valor === null || valor === undefined ? "" : String(valor);
+        return `"${t.replace(/"/g, '""')}"`;
     }
 
     /**
-     * Dispara la descarga de un archivo de texto generado en el
-     * navegador (usado para exportaciones CSV y plantillas).
+     * Dispara la descarga de un archivo de texto desde el navegador.
      * @param {string} contenido
      * @param {string} nombreArchivo
      * @param {string} [tipoMime]
      */
     function descargarTexto(contenido, nombreArchivo, tipoMime) {
         const blob = new Blob([contenido], { type: tipoMime || "text/plain;charset=utf-8;" });
-        const enlace = document.createElement("a");
-        enlace.href = URL.createObjectURL(blob);
-        enlace.download = nombreArchivo;
-        document.body.appendChild(enlace);
-        enlace.click();
-        document.body.removeChild(enlace);
-        URL.revokeObjectURL(enlace.href);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = nombreArchivo;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
     }
 
+    // ----------------------------------------------------------------
+    // API pública
+    // ----------------------------------------------------------------
     return Object.freeze({
         pad,
         generarId,
         aNumero,
         aEntero,
+        aDecimal,
         redondear2,
         formatearMoneda,
+        formatearCantidad,
         formatearFechaHora,
         escaparHtml,
         debounce,
@@ -343,10 +341,7 @@ const Helpers = (function () {
         detectarDelimitadorCsv,
         parsearCsv,
         normalizarNumeroLocal,
-        aDecimal,
-        formatearCantidad,
         escaparCsv,
         descargarTexto,
     });
 })();
-        
