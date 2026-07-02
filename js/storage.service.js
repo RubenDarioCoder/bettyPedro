@@ -1,163 +1,100 @@
-
+/**
+ * =====================================================================
+ *  StorageService — Única capa que lee/escribe localStorage
+ * =====================================================================
+ */
 const StorageService = (function () {
     "use strict";
 
-    // ------------------------------------------------------------
-    // Claves de almacenamiento (se mantienen idénticas a versiones
-    // anteriores para no perder datos ya guardados por los usuarios).
-    // ------------------------------------------------------------
     const KEYS = Object.freeze({
-        PRODUCTOS: "almacen_v5_productos",
-        RUBROS: "almacen_v5_rubros",
-        VENTAS: "almacen_historial_ventas",
-        FIADOS: "almacen_registros",
+        PRODUCTOS:   "almacen_v5_productos",
+        RUBROS:      "almacen_v5_rubros",
+        VENTAS:      "almacen_historial_ventas",
+        FIADOS:      "almacen_registros",
         PROVEEDORES: "almacen_proveedores",
-        TEMA: "almacen_tema",
+        TEMA:        "almacen_tema",
     });
 
     const RUBROS_INICIALES = ["ALMACÉN", "BEBIDAS", "FIAMBRES"];
 
     const DESGLOSE_PAGO_VACIO = Object.freeze({
-        EFECTIVO: 0,
-        DEBITO: 0,
-        CREDITO: 0,
-        TRANSFERENCIA: 0,
-        FIADO: 0,
+        EFECTIVO: 0, DEBITO: 0, CREDITO: 0, TRANSFERENCIA: 0, FIADO: 0,
     });
 
-    // ------------------------------------------------------------
-    // Lectura / escritura genérica con manejo de errores
-    // ------------------------------------------------------------
+    const VERSION_BACKUP = 1;
 
-    /**
-     * Lee y parsea una clave de localStorage. Si no existe o el JSON
-     * está corrupto, devuelve `valorPorDefecto` sin lanzar excepciones.
-     * @param {string} clave
-     * @param {*} valorPorDefecto
-     * @returns {*}
-     */
-    function leer(clave, valorPorDefecto) {
+    // ----------------------------------------------------------------
+    // Lectura / escritura genérica
+    // ----------------------------------------------------------------
+
+    function leer(clave, porDefecto) {
         try {
-            const crudo = localStorage.getItem(clave);
-            if (crudo === null) return valorPorDefecto;
-            const parseado = JSON.parse(crudo);
-            return parseado === null || parseado === undefined ? valorPorDefecto : parseado;
-        } catch (error) {
-            console.error(`StorageService: no se pudo leer "${clave}". Se usan valores por defecto.`, error);
-            return valorPorDefecto;
-        }
+            const v = localStorage.getItem(clave);
+            if (v === null) return porDefecto;
+            const p = JSON.parse(v);
+            return (p === null || p === undefined) ? porDefecto : p;
+        } catch { return porDefecto; }
     }
 
-    /**
-     * Serializa y guarda un valor en localStorage.
-     * @param {string} clave
-     * @param {*} valor
-     * @returns {boolean} true si se guardó correctamente
-     */
     function escribir(clave, valor) {
-        try {
-            localStorage.setItem(clave, JSON.stringify(valor));
-            return true;
-        } catch (error) {
-            console.error(`StorageService: no se pudo guardar "${clave}".`, error);
-            return false;
-        }
+        try { localStorage.setItem(clave, JSON.stringify(valor)); return true; }
+        catch (e) { console.error(`StorageService: no se pudo guardar "${clave}".`, e); return false; }
     }
 
-    // ------------------------------------------------------------
-    // Sanitización de modelos de datos
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // Sanitización
+    // ----------------------------------------------------------------
 
-    /**
-     * Normaliza un registro de producto, garantizando todos los campos
-     * numéricos y de texto requeridos por el resto de la aplicación.
-     * @param {object} producto
-     * @returns {object}
-     */
-    function sanitizarProducto(producto) {
-        const p = producto && typeof producto === "object" ? producto : {};
+    function sanitizarProducto(p) {
+        p = (p && typeof p === "object") ? p : {};
         return {
-            nombre: typeof p.nombre === "string" ? p.nombre : "",
+            nombre:      typeof p.nombre === "string" ? p.nombre : "",
             descripcion: typeof p.descripcion === "string" ? p.descripcion : "",
-            rubro: typeof p.rubro === "string" && p.rubro.trim() ? p.rubro : "ALMACÉN",
-            costo: Helpers.aNumero(p.costo, 0),
-            porcentaje: Helpers.aNumero(p.porcentaje, 0),
-            precioVenta: Helpers.aNumero(p.precioVenta, 0),
-            stock: Helpers.aDecimal(p.stock, 3, 0),
+            rubro:       (typeof p.rubro === "string" && p.rubro.trim()) ? p.rubro : "ALMACÉN",
+            // Precios guardados como número (sin centavos al nivel de catálogo)
+            costo:       Helpers.redondear2(Helpers.aNumero(p.costo, 0)),
+            porcentaje:  Helpers.aNumero(p.porcentaje, 0),
+            precioVenta: Helpers.redondear2(Helpers.aNumero(p.precioVenta, 0)),
+            // Stock puede ser decimal (productos por peso)
+            stock:       Helpers.aDecimal(p.stock, 3, 0),
             limiteStock: Helpers.aDecimal(p.limiteStock, 3, 3),
         };
     }
 
-    /**
-     * Normaliza el diccionario completo de productos (clave = código de
-     * barras / SKU). Descarta entradas sin código válido.
-     * @param {object} db
-     * @returns {object}
-     */
     function sanitizarProductosDB(db) {
-        const limpio = {};
+        const out = {};
         if (db && typeof db === "object") {
-            Object.keys(db).forEach((codigo) => {
-                if (!codigo) return;
-                limpio[String(codigo)] = sanitizarProducto(db[codigo]);
-            });
+            Object.keys(db).forEach(cod => { if (cod) out[String(cod)] = sanitizarProducto(db[cod]); });
         }
-        return limpio;
+        return out;
     }
 
-    /**
-     * Normaliza la lista de rubros disponibles, eliminando duplicados
-     * y valores vacíos.
-     * @param {Array} rubros
-     * @returns {string[]}
-     */
-    function sanitizarRubros(rubros) {
-        const base = Array.isArray(rubros) ? rubros : [];
-        const limpio = base
-            .map((r) => (typeof r === "string" ? r.trim().toUpperCase() : ""))
-            .filter((r) => r.length > 0);
+    function sanitizarRubros(arr) {
+        const base = Array.isArray(arr) ? arr : [];
+        const limpio = base.map(r => typeof r === "string" ? r.trim().toUpperCase() : "").filter(r => r);
         return Array.from(new Set(limpio.length ? limpio : RUBROS_INICIALES));
     }
 
-    /**
-     * Normaliza un ítem individual dentro del ticket de una venta.
-     * @param {object} item
-     * @returns {object}
-     */
     function sanitizarItemVenta(item) {
-        const i = item && typeof item === "object" ? item : {};
+        item = (item && typeof item === "object") ? item : {};
         return {
-            codigo: i.codigo !== undefined && i.codigo !== null ? String(i.codigo) : "",
-            nombre: typeof i.nombre === "string" ? i.nombre : "",
-            rubro: typeof i.rubro === "string" ? i.rubro : "ALMACÉN",
-            costo: Helpers.aNumero(i.costo, 0),
-            precio: Helpers.aNumero(i.precio, 0),
-            cantidad: Helpers.aDecimal(i.cantidad, 3, 0),
+            codigo:   (item.codigo !== undefined && item.codigo !== null) ? String(item.codigo) : "",
+            nombre:   typeof item.nombre === "string" ? item.nombre : "",
+            rubro:    typeof item.rubro  === "string" ? item.rubro  : "ALMACÉN",
+            costo:    Helpers.aNumero(item.costo, 0),
+            precio:   Helpers.aNumero(item.precio, 0),      // precio unitario, se guarda como número
+            cantidad: Helpers.aDecimal(item.cantidad, 3, 0),// cantidad decimal permitida
         };
     }
 
-    /**
-     * Normaliza un registro de venta del historial. Si el registro es
-     * inválido (no es un objeto), devuelve `null` para que el llamador
-     * lo descarte.
-     *
-     * IMPORTANTE — compatibilidad con registros antiguos: las ventas
-     * creadas antes de incorporar el cobro combinado no tienen el
-     * campo `desglosePago`. Para que el cálculo de efectivo en caja
-     * siga siendo correcto sobre ese historial, se reconstruye el
-     * desglose a partir de `metodoPago` + `total` cuando el campo no
-     * existe (ej: una venta vieja "EFECTIVO" por $100 se reconstruye
-     * como `{ EFECTIVO: 100, ... resto en 0 }`).
-     *
-     * @param {object} venta
-     * @returns {object|null}
-     */
     function sanitizarVenta(venta) {
         if (!venta || typeof venta !== "object") return null;
 
-        const metodoPago = typeof venta.metodoPago === "string" && venta.metodoPago ? venta.metodoPago : "EFECTIVO";
-        const total = Helpers.aNumero(venta.total, 0);
+        const metodoPago = (typeof venta.metodoPago === "string" && venta.metodoPago)
+            ? venta.metodoPago : "EFECTIVO";
+        const total = Helpers.redondear2(Helpers.aNumero(venta.total, 0));
 
+        // Compatibilidad con registros anteriores sin desglosePago
         let origenDesglose = venta.desglosePago;
         if (!origenDesglose || typeof origenDesglose !== "object") {
             origenDesglose = {};
@@ -166,177 +103,99 @@ const StorageService = (function () {
             }
         }
         const desglose = Object.assign({}, DESGLOSE_PAGO_VACIO, origenDesglose);
-        Object.keys(desglose).forEach((clave) => (desglose[clave] = Helpers.aNumero(desglose[clave], 0)));
+        Object.keys(desglose).forEach(k => (desglose[k] = Helpers.aNumero(desglose[k], 0)));
 
         return {
-            id: venta.id || Helpers.generarId("TK"),
-            fechaIso: typeof venta.fechaIso === "string" ? venta.fechaIso : new Date().toISOString(),
+            id:              venta.id || Helpers.generarId("TK"),
+            fechaIso:        typeof venta.fechaIso === "string" ? venta.fechaIso : new Date().toISOString(),
             fechaFormateada: typeof venta.fechaFormateada === "string" ? venta.fechaFormateada : "",
-            cliente: typeof venta.cliente === "string" && venta.cliente.trim() ? venta.cliente : "Mostrador",
+            cliente:         (typeof venta.cliente === "string" && venta.cliente.trim()) ? venta.cliente : "Mostrador",
             metodoPago,
             total,
-            productos: Array.isArray(venta.productos) ? venta.productos.map(sanitizarItemVenta) : [],
-            desglosePago: desglose,
-            vueltoEntregado: Helpers.aNumero(venta.vueltoEntregado, 0),
+            productos:       Array.isArray(venta.productos) ? venta.productos.map(sanitizarItemVenta) : [],
+            desglosePago:    desglose,
+            vueltoEntregado: Helpers.redondear2(Helpers.aNumero(venta.vueltoEntregado, 0)),
         };
     }
 
-    /**
-     * Normaliza un registro de cuenta corriente (fiado).
-     * @param {object} registro
-     * @returns {object|null}
-     */
-    function sanitizarFiado(registro) {
-        if (!registro || typeof registro !== "object") return null;
+    function sanitizarFiado(r) {
+        if (!r || typeof r !== "object") return null;
         return {
-            id: registro.id || Helpers.generarId("FD"),
-            nombre: typeof registro.nombre === "string" ? registro.nombre : "",
-            monto: Helpers.aNumero(registro.monto, 0),
-            tipo: registro.tipo === "PAGO" ? "PAGO" : "DEUDA",
-            fechaHora: typeof registro.fechaHora === "string" ? registro.fechaHora : "",
+            id:       r.id || Helpers.generarId("FD"),
+            nombre:   typeof r.nombre === "string" ? r.nombre : "",
+            monto:    Helpers.redondear2(Helpers.aNumero(r.monto, 0)),
+            tipo:     r.tipo === "PAGO" ? "PAGO" : "DEUDA",
+            fechaHora:typeof r.fechaHora === "string" ? r.fechaHora : "",
         };
     }
 
-    /**
-     * Normaliza un registro de pago/gasto a proveedor.
-     * @param {object} registro
-     * @returns {object|null}
-     */
-    function sanitizarProveedor(registro) {
-        if (!registro || typeof registro !== "object") return null;
+    function sanitizarProveedor(r) {
+        if (!r || typeof r !== "object") return null;
         return {
-            id: registro.id || Helpers.generarId("PROV"),
-            nombre: typeof registro.nombre === "string" ? registro.nombre : "",
-            monto: Helpers.aNumero(registro.monto, 0),
-            detalle: typeof registro.detalle === "string" && registro.detalle ? registro.detalle : "Gasto",
-            fecha: typeof registro.fecha === "string" ? registro.fecha : "",
+            id:      r.id || Helpers.generarId("PROV"),
+            nombre:  typeof r.nombre === "string" ? r.nombre : "",
+            monto:   Helpers.redondear2(Helpers.aNumero(r.monto, 0)),
+            detalle: (typeof r.detalle === "string" && r.detalle) ? r.detalle : "Gasto",
+            fecha:   typeof r.fecha === "string" ? r.fecha : "",
         };
     }
 
-    // ------------------------------------------------------------
-    // API: Productos y Rubros
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // API CRUD
+    // ----------------------------------------------------------------
 
-    /**
-     * Devuelve el catálogo de productos almacenado, sanitizado.
-     * Devuelve `null` si nunca se inicializó (primera ejecución).
-     * @returns {object|null}
-     */
     function cargarProductos() {
-        const crudo = leer(KEYS.PRODUCTOS, null);
-        if (crudo === null) return null;
-        return sanitizarProductosDB(crudo);
+        const v = leer(KEYS.PRODUCTOS, null);
+        return v === null ? null : sanitizarProductosDB(v);
     }
+    function guardarProductos(db) { return escribir(KEYS.PRODUCTOS, db); }
 
-    /** Persiste el catálogo de productos. */
-    function guardarProductos(productosDB) {
-        return escribir(KEYS.PRODUCTOS, productosDB);
-    }
+    function cargarRubros()      { return sanitizarRubros(leer(KEYS.RUBROS, RUBROS_INICIALES)); }
+    function guardarRubros(arr)  { return escribir(KEYS.RUBROS, sanitizarRubros(arr)); }
 
-    /** Devuelve la lista de rubros disponibles, sanitizada. */
-    function cargarRubros() {
-        return sanitizarRubros(leer(KEYS.RUBROS, RUBROS_INICIALES));
-    }
-
-    /** Persiste la lista de rubros disponibles. */
-    function guardarRubros(rubros) {
-        return escribir(KEYS.RUBROS, sanitizarRubros(rubros));
-    }
-
-    // ------------------------------------------------------------
-    // API: Historial de ventas
-    // ------------------------------------------------------------
-
-    /** Devuelve el historial completo de ventas, sanitizado. */
     function cargarVentas() {
-        const crudo = leer(KEYS.VENTAS, []);
-        return Array.isArray(crudo) ? crudo.map(sanitizarVenta).filter(Boolean) : [];
+        const v = leer(KEYS.VENTAS, []);
+        return Array.isArray(v) ? v.map(sanitizarVenta).filter(Boolean) : [];
     }
+    function guardarVentas(arr)  { return escribir(KEYS.VENTAS, arr); }
 
-    /** Persiste el historial completo de ventas. */
-    function guardarVentas(ventas) {
-        return escribir(KEYS.VENTAS, ventas);
-    }
-
-    // ------------------------------------------------------------
-    // API: Fiados
-    // ------------------------------------------------------------
-
-    /** Devuelve los registros de cuentas corrientes (fiados), sanitizados. */
     function cargarFiados() {
-        const crudo = leer(KEYS.FIADOS, []);
-        return Array.isArray(crudo) ? crudo.map(sanitizarFiado).filter(Boolean) : [];
+        const v = leer(KEYS.FIADOS, []);
+        return Array.isArray(v) ? v.map(sanitizarFiado).filter(Boolean) : [];
     }
+    function guardarFiados(arr)  { return escribir(KEYS.FIADOS, arr); }
 
-    /** Persiste los registros de cuentas corrientes (fiados). */
-    function guardarFiados(registros) {
-        return escribir(KEYS.FIADOS, registros);
-    }
-
-    // ------------------------------------------------------------
-    // API: Proveedores
-    // ------------------------------------------------------------
-
-    /** Devuelve los registros de pagos a proveedores, sanitizados. */
     function cargarProveedores() {
-        const crudo = leer(KEYS.PROVEEDORES, []);
-        return Array.isArray(crudo) ? crudo.map(sanitizarProveedor).filter(Boolean) : [];
+        const v = leer(KEYS.PROVEEDORES, []);
+        return Array.isArray(v) ? v.map(sanitizarProveedor).filter(Boolean) : [];
     }
+    function guardarProveedores(arr) { return escribir(KEYS.PROVEEDORES, arr); }
 
-    /** Persiste los registros de pagos a proveedores. */
-    function guardarProveedores(registros) {
-        return escribir(KEYS.PROVEEDORES, registros);
-    }
+    function cargarTema()  { const t = leer(KEYS.TEMA, null); return (t === "dark" || t === "light") ? t : null; }
+    function guardarTema(t){ return escribir(KEYS.TEMA, t === "dark" ? "dark" : "light"); }
 
-    // ------------------------------------------------------------
-    // API: Tema (claro / oscuro)
-    // ------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // Inicialización
+    // ----------------------------------------------------------------
 
-    /** Devuelve el tema guardado ("light" | "dark") o `null` si no hay preferencia. */
-    function cargarTema() {
-        const tema = leer(KEYS.TEMA, null);
-        return tema === "dark" || tema === "light" ? tema : null;
-    }
-
-    /** Persiste la preferencia de tema del usuario. */
-    function guardarTema(tema) {
-        return escribir(KEYS.TEMA, tema === "dark" ? "dark" : "light");
-    }
-
-    // ------------------------------------------------------------
-    // Inicialización / siembra de datos de referencia
-    // ------------------------------------------------------------
-
-    /**
-     * Inicializa el almacenamiento en el primer arranque de la
-     * aplicación. Si ya existen productos guardados, no hace nada.
-     *
-     * Si es la primera vez (no hay catálogo guardado) y el archivo de
-     * referencia `database.js` está disponible (función global
-     * `instalarBaseDeDatosOriginal`), se utiliza para precargar el
-     * catálogo y los rubros. `database.js` no se modifica: solo se
-     * consume su función de exportación.
-     *
-     * @returns {{ productos: object, rubros: string[] }}
-     */
     function inicializar() {
         let productos = cargarProductos();
-        let rubros = cargarRubros();
+        let rubros    = cargarRubros();
 
         if (productos === null) {
             if (typeof instalarBaseDeDatosOriginal === "function") {
                 try {
                     const semilla = instalarBaseDeDatosOriginal();
                     productos = sanitizarProductosDB(semilla && semilla.db);
-                    rubros = sanitizarRubros([...RUBROS_INICIALES, ...((semilla && semilla.rubros) || [])]);
-                } catch (error) {
-                    console.error("StorageService: error al cargar la base de datos de referencia.", error);
+                    rubros    = sanitizarRubros([...RUBROS_INICIALES, ...((semilla && semilla.rubros) || [])]);
+                } catch (e) {
+                    console.error("StorageService: error al cargar la base de datos de referencia.", e);
                     productos = {};
-                    rubros = sanitizarRubros(RUBROS_INICIALES);
+                    rubros    = sanitizarRubros(RUBROS_INICIALES);
                 }
             } else {
                 productos = {};
-                rubros = sanitizarRubros(RUBROS_INICIALES);
+                rubros    = sanitizarRubros(RUBROS_INICIALES);
             }
             guardarProductos(productos);
             guardarRubros(rubros);
@@ -345,25 +204,115 @@ const StorageService = (function () {
         return { productos, rubros };
     }
 
+    // ----------------------------------------------------------------
+    // Backup / Restore — copia de seguridad completa
+    // ----------------------------------------------------------------
+
+    /**
+     * Genera el objeto de backup y devuelve el nombre de archivo y el
+     * JSON serializado listos para descargar.
+     */
+    function exportarTodo() {
+        const ahora = new Date();
+        const marca =
+            `${ahora.getFullYear()}-${Helpers.pad(ahora.getMonth() + 1)}-${Helpers.pad(ahora.getDate())}` +
+            `_${Helpers.pad(ahora.getHours())}-${Helpers.pad(ahora.getMinutes())}`;
+
+        const backup = {
+            version:     VERSION_BACKUP,
+            generadoEn:  ahora.toISOString(),
+            productos:   leer(KEYS.PRODUCTOS,   {}),
+            rubros:      leer(KEYS.RUBROS,       RUBROS_INICIALES),
+            ventas:      leer(KEYS.VENTAS,       []),
+            fiados:      leer(KEYS.FIADOS,       []),
+            proveedores: leer(KEYS.PROVEEDORES,  []),
+        };
+
+        return { nombre: `backup_almacen_${marca}.json`, contenido: JSON.stringify(backup, null, 2) };
+    }
+
+    /**
+     * Aplica un objeto de backup parseado.
+     * @param {object} backup
+     * @param {"reemplazar"|"combinar"} modo
+     * @returns {{ ok: boolean, mensaje: string, resumen: object, ...datos }}
+     */
+    function restaurarTodo(backup, modo = "reemplazar") {
+        if (!backup || typeof backup !== "object") {
+            return { ok: false, mensaje: "El archivo no contiene datos válidos.", resumen: {} };
+        }
+        if (backup.version && backup.version > VERSION_BACKUP) {
+            return { ok: false, mensaje: `Archivo de versión más nueva (v${backup.version}). Actualizá la app.`, resumen: {} };
+        }
+
+        const pNuevos  = sanitizarProductosDB(backup.productos || {});
+        const rNuevos  = sanitizarRubros(backup.rubros || []);
+        const vNuevas  = Array.isArray(backup.ventas)      ? backup.ventas.map(sanitizarVenta).filter(Boolean)       : [];
+        const fNuevos  = Array.isArray(backup.fiados)      ? backup.fiados.map(sanitizarFiado).filter(Boolean)       : [];
+        const prNuevos = Array.isArray(backup.proveedores) ? backup.proveedores.map(sanitizarProveedor).filter(Boolean) : [];
+
+        let productos, rubros, ventas, fiados, proveedores;
+
+        if (modo === "combinar") {
+            const pLocal  = cargarProductos() || {};
+            productos = Object.assign({}, pLocal, pNuevos);
+            rubros    = sanitizarRubros(Array.from(new Set([...cargarRubros(), ...rNuevos])));
+
+            const idsV = new Set(cargarVentas().map(v => v.id));
+            ventas     = [...cargarVentas(),      ...vNuevas.filter(v  => !idsV.has(v.id))];
+
+            const idsF = new Set(cargarFiados().map(f => f.id));
+            fiados     = [...cargarFiados(),      ...fNuevos.filter(f  => !idsF.has(f.id))];
+
+            const idsP = new Set(cargarProveedores().map(p => p.id));
+            proveedores= [...cargarProveedores(), ...prNuevos.filter(p => !idsP.has(p.id))];
+        } else {
+            productos   = pNuevos;
+            rubros      = rNuevos;
+            ventas      = vNuevas;
+            fiados      = fNuevos;
+            proveedores = prNuevos;
+        }
+
+        guardarProductos(productos);
+        guardarRubros(rubros);
+        guardarVentas(ventas);
+        guardarFiados(fiados);
+        guardarProveedores(proveedores);
+
+        return {
+            ok: true,
+            mensaje: "Restauración completada.",
+            resumen: {
+                productos:   Object.keys(productos).length,
+                rubros:      rubros.length,
+                ventas:      ventas.length,
+                fiados:      fiados.length,
+                proveedores: proveedores.length,
+            },
+            productos, rubros, ventas, fiados, proveedores,
+        };
+    }
+
+    // ----------------------------------------------------------------
+    // API pública
+    // ----------------------------------------------------------------
     return Object.freeze({
         KEYS,
         DESGLOSE_PAGO_VACIO,
         inicializar,
-        cargarProductos,
-        guardarProductos,
-        cargarRubros,
-        guardarRubros,
-        cargarVentas,
-        guardarVentas,
-        cargarFiados,
-        guardarFiados,
-        cargarProveedores,
-        guardarProveedores,
-        cargarTema,
-        guardarTema,
+        cargarProductos,  guardarProductos,
+        cargarRubros,     guardarRubros,
+        cargarVentas,     guardarVentas,
+        cargarFiados,     guardarFiados,
+        cargarProveedores,guardarProveedores,
+        cargarTema,       guardarTema,
         sanitizarProducto,
+        sanitizarProductosDB,
         sanitizarVenta,
         sanitizarFiado,
         sanitizarProveedor,
+        exportarTodo,
+        restaurarTodo,
     });
 })();
